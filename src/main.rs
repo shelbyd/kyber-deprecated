@@ -14,9 +14,9 @@ use tui::{
 };
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-enum ControlFlow {
+enum ControlFlow<B = ()> {
     Continue,
-    Break,
+    Break(B),
 }
 
 trait EventHandler {
@@ -99,15 +99,19 @@ impl FileSearch {
 }
 
 impl EventHandler for FileSearch {
-    type Handled = ControlFlow;
+    type Handled = ControlFlow<Option<String>>;
 
-    fn event(&mut self, event: &Event) -> EventHandling<ControlFlow> {
+    fn event(&mut self, event: &Event) -> EventHandling<ControlFlow<Option<String>>> {
+        if &Event::Key(Key::Char('\n')) == event {
+            let result = self.suggestions().next().map(Into::into);
+            return ControlFlow::Break(result).into();
+        }
         if let EventHandling::Handled(()) = self.fuzzy_text.event(&event) {
             return ControlFlow::Continue.into();
         }
 
         match event {
-            Event::Key(Key::Esc) => return ControlFlow::Break.into(),
+            Event::Key(Key::Esc) => return ControlFlow::Break(None).into(),
             _ => {}
         }
 
@@ -174,9 +178,57 @@ impl<'a> Into<Text<'a>> for FuzzyMatch {
     }
 }
 
+impl Into<String> for FuzzyMatch {
+    fn into(self) -> String {
+        self.regions.into_iter().map(|(s, _)| s).collect()
+    }
+}
+
+#[derive(Default)]
+struct Cursor {
+    line: usize,
+    column: usize,
+}
+
+impl Cursor {
+    fn event(&mut self, event: &Event, contents: &str) -> EventHandling {
+        if let &Event::Key(Key::Char(c)) = event {
+            match c {
+                'j' => self.delta(0, 1, contents),
+                'k' => self.delta(0, -1, contents),
+                'l' => self.delta(1, 0, contents),
+                'h' => self.delta(-1, 0, contents),
+                _ => return EventHandling::NotHandled,
+            }
+            return EventHandling::Handled(());
+        }
+        EventHandling::NotHandled
+    }
+
+    fn delta(&mut self, col: isize, line: isize, contents: &str) {
+        use core::cmp::*;
+
+        let usize_delta = |val, delta: isize| {
+            let with_delta = (val as isize).saturating_add(delta);
+            max(0, with_delta) as usize
+        };
+        let desired_line = usize_delta(self.line, line);
+        let desired_col = usize_delta(self.column, col);
+
+        let line = min(contents.lines().count(), desired_line);
+        let line_contents = contents.lines().nth(line).unwrap();
+        let column = min(line_contents.chars().count(), desired_col);
+
+        self.line = line;
+        self.column = column;
+    }
+}
+
 #[derive(Default)]
 struct App {
     file_search: Option<FileSearch>,
+    contents: String,
+    cursor: Cursor,
 }
 
 impl App {
@@ -194,23 +246,19 @@ impl App {
             ])
             .split(frame.size());
 
-        let text = vec![
-            Spans::from(vec![
-                Span::raw("First"),
-                Span::styled("line", Style::default().add_modifier(Modifier::ITALIC)),
-                Span::raw("."),
-            ]),
-            Spans::from(Span::styled("Second line", Style::default().fg(Color::Red))),
-        ];
-        let p = Paragraph::new(text)
-            .style(Style::default().fg(Color::White).bg(Color::Black))
-            .alignment(Alignment::Center)
-            .wrap(Wrap { trim: true });
+        let text = self
+            .contents
+            .lines()
+            .map(|line| Spans::from(Span::raw(line)))
+            .collect::<Vec<_>>();
+        let p = Paragraph::new(text).style(Style::default().fg(Color::White).bg(Color::Black));
         frame.render_widget(p, chunks[0]);
 
         if let Some(search) = self.file_search.as_ref() {
             search.render(frame, chunks[1]);
         }
+
+        frame.set_cursor(self.cursor.column as u16, self.cursor.line as u16);
     }
 }
 
@@ -218,17 +266,24 @@ impl EventHandler for App {
     type Handled = ControlFlow;
 
     fn event(&mut self, event: &Event) -> EventHandling<ControlFlow> {
-        if let Some(EventHandling::Handled(flow)) =
-            self.file_search.as_mut().map(|search| search.event(&event))
-        {
-            if flow == ControlFlow::Break {
+        let file_search_handling = self.file_search.as_mut().map(|search| search.event(&event));
+        if let Some(EventHandling::Handled(flow)) = file_search_handling {
+            if let ControlFlow::Break(file) = flow {
                 self.file_search = None;
+                if let Some(path) = file {
+                    self.contents = std::fs::read_to_string(path).unwrap();
+                    self.cursor = Cursor::default();
+                }
             }
             return ControlFlow::Continue.into();
         }
 
+        if let EventHandling::Handled(()) = self.cursor.event(&event, &self.contents) {
+            return ControlFlow::Continue.into();
+        }
+
         match event {
-            Event::Key(Key::Char('q')) => return ControlFlow::Break.into(),
+            Event::Key(Key::Char('q')) => return ControlFlow::Break(()).into(),
             Event::Key(Key::Ctrl('p')) => {
                 self.file_search = Some(FileSearch::default());
             }
@@ -263,7 +318,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         };
         let event = event?;
         match app.event(&event) {
-            EventHandling::Handled(ControlFlow::Break) => break,
+            EventHandling::Handled(ControlFlow::Break(())) => break,
             EventHandling::Handled(ControlFlow::Continue) => {}
             EventHandling::NotHandled => {
                 log::debug!("unhandled event {:?}", event);
