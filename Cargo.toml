@@ -7,5 +7,6 @@ authors = ["Shelby Doolittle <shelby@shelbyd.com>"]
 license = "MIT"
 
 [dependencies]
+ignore = "0.4"
 termion = "1.5"
 tui = "0.15"
