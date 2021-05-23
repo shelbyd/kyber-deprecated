@@ -222,6 +222,12 @@ impl Cursor {
         self.line = line;
         self.column = column;
     }
+
+    fn render_lines(&self, render_rect: Rect) -> (usize, usize) {
+        let height = render_rect.height as usize;
+        let begin = self.line.saturating_sub(height / 2);
+        (begin, begin + height)
+    }
 }
 
 #[derive(Default)]
@@ -246,9 +252,12 @@ impl App {
             ])
             .split(frame.size());
 
+        let (begin, end) = self.cursor.render_lines(chunks[0]);
         let text = self
             .contents
             .lines()
+            .skip(begin)
+            .take(end - begin)
             .map(|line| Spans::from(Span::raw(line)))
             .collect::<Vec<_>>();
         let p = Paragraph::new(text).style(Style::default().fg(Color::White).bg(Color::Black));
@@ -258,7 +267,7 @@ impl App {
             search.render(frame, chunks[1]);
         }
 
-        frame.set_cursor(self.cursor.column as u16, self.cursor.line as u16);
+        frame.set_cursor(self.cursor.column as u16, (self.cursor.line - begin) as u16);
     }
 }
 
