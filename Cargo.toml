@@ -1,9 +1,10 @@
 [package]
 name = "kyber"
+description = "Code editor focused on transformations."
 version = "0.1.0"
 edition = "2018"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+authors = ["Shelby Doolittle <shelby@shelbyd.com>"]
+license = "MIT"
 
 [dependencies]
 termion = "1.5"
