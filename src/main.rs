@@ -11,9 +11,23 @@ use tui::{
     widgets::{Block, Paragraph, Widget, Wrap},
 };
 
-struct App;
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum ControlFlow {
+    Continue,
+    Break,
+}
+
+#[derive(Default)]
+struct App {}
 
 impl App {
+    fn event(&mut self, event: Event) -> ControlFlow {
+        match event {
+            Event::Key(Key::Char('q')) => ControlFlow::Break,
+            _ => ControlFlow::Continue,
+        }
+    }
+
     fn render(&self) -> impl Widget {
         let text = vec![
             Spans::from(vec![
@@ -44,7 +58,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let backend = tui::backend::TermionBackend::new(stdout);
     let mut terminal = tui::Terminal::new(backend)?;
 
-    let mut app = App;
+    let mut app = App::default();
 
     loop {
         terminal.draw(|f| {
@@ -56,9 +70,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             Some(e) => e,
             None => break,
         };
-        match event? {
-            Event::Key(Key::Char('q')) => break,
-            _ => {}
+        match app.event(event?) {
+            ControlFlow::Break => break,
+            ControlFlow::Continue => {}
         }
     }
 
