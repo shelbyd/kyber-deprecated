@@ -240,6 +240,8 @@ impl EventHandler for App {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    env_logger::init();
+
     let stdin = io::stdin();
     let mut events = stdin.events();
 
@@ -263,7 +265,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         match app.event(&event) {
             EventHandling::Handled(ControlFlow::Break) => break,
             EventHandling::Handled(ControlFlow::Continue) => {}
-            EventHandling::NotHandled => {}
+            EventHandling::NotHandled => {
+                log::debug!("unhandled event {:?}", event);
+            }
         }
     }
 

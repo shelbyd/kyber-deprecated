@@ -7,6 +7,8 @@ authors = ["Shelby Doolittle <shelby@shelbyd.com>"]
 license = "MIT"
 
 [dependencies]
+log = "0.4"
 ignore = "0.4"
+env_logger = "0.8"
 termion = "1.5"
 tui = "0.15"
