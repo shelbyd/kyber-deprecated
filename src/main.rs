@@ -19,6 +19,39 @@ enum ControlFlow {
     Break,
 }
 
+trait EventHandler {
+    type Handled;
+
+    fn event(&mut self, event: &Event) -> EventHandling<Self::Handled>;
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum EventHandling<H = ()> {
+    Handled(H),
+    NotHandled,
+}
+
+impl EventHandler for String {
+    type Handled = ();
+
+    fn event(&mut self, event: &Event) -> EventHandling {
+        match event {
+            Event::Key(Key::Char(c)) => self.push(*c),
+            Event::Key(Key::Backspace) => {
+                self.pop();
+            }
+            _ => return EventHandling::NotHandled,
+        }
+        EventHandling::Handled(())
+    }
+}
+
+impl<T> From<T> for EventHandling<T> {
+    fn from(t: T) -> EventHandling<T> {
+        EventHandling::Handled(t)
+    }
+}
+
 #[derive(Default)]
 struct FileSearch {
     fuzzy_text: String,
@@ -42,16 +75,6 @@ impl FileSearch {
             .take(5)
     }
 
-    fn event(&mut self, event: Event) -> ControlFlow {
-        match event {
-            Event::Key(Key::Esc) => return ControlFlow::Break,
-            Event::Key(Key::Char(c)) => self.fuzzy_text.push(c),
-            _ => {}
-        }
-
-        ControlFlow::Continue
-    }
-
     fn render<B: Backend>(&self, frame: &mut Frame<B>, size: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -72,6 +95,23 @@ impl FileSearch {
         let p =
             Paragraph::new(search_text).style(Style::default().fg(Color::White).bg(Color::Black));
         frame.render_widget(p, chunks[1]);
+    }
+}
+
+impl EventHandler for FileSearch {
+    type Handled = ControlFlow;
+
+    fn event(&mut self, event: &Event) -> EventHandling<ControlFlow> {
+        if let EventHandling::Handled(()) = self.fuzzy_text.event(&event) {
+            return ControlFlow::Continue.into();
+        }
+
+        match event {
+            Event::Key(Key::Esc) => return ControlFlow::Break.into(),
+            _ => {}
+        }
+
+        EventHandling::NotHandled
     }
 }
 
@@ -140,27 +180,6 @@ struct App {
 }
 
 impl App {
-    fn event(&mut self, event: Event) -> ControlFlow {
-        if let Some(search) = self.file_search.as_mut() {
-            match search.event(event) {
-                ControlFlow::Break => {
-                    self.file_search = None;
-                }
-                ControlFlow::Continue => {}
-            }
-        } else {
-            match event {
-                Event::Key(Key::Char('q')) => return ControlFlow::Break,
-                Event::Key(Key::Ctrl('p')) => {
-                    self.file_search = Some(FileSearch::default());
-                }
-                _ => {}
-            }
-        }
-
-        ControlFlow::Continue
-    }
-
     fn render<B: Backend>(&self, frame: &mut Frame<B>) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -195,6 +214,31 @@ impl App {
     }
 }
 
+impl EventHandler for App {
+    type Handled = ControlFlow;
+
+    fn event(&mut self, event: &Event) -> EventHandling<ControlFlow> {
+        if let Some(EventHandling::Handled(flow)) =
+            self.file_search.as_mut().map(|search| search.event(&event))
+        {
+            if flow == ControlFlow::Break {
+                self.file_search = None;
+            }
+            return ControlFlow::Continue.into();
+        }
+
+        match event {
+            Event::Key(Key::Char('q')) => return ControlFlow::Break.into(),
+            Event::Key(Key::Ctrl('p')) => {
+                self.file_search = Some(FileSearch::default());
+            }
+            _ => {}
+        }
+
+        EventHandling::NotHandled
+    }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let stdin = io::stdin();
     let mut events = stdin.events();
@@ -215,9 +259,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             Some(e) => e,
             None => break,
         };
-        match app.event(event?) {
-            ControlFlow::Break => break,
-            ControlFlow::Continue => {}
+        let event = event?;
+        match app.event(&event) {
+            EventHandling::Handled(ControlFlow::Break) => break,
+            EventHandling::Handled(ControlFlow::Continue) => {}
+            EventHandling::NotHandled => {}
         }
     }
 
