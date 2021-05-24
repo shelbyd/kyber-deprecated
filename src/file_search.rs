@@ -78,7 +78,7 @@ impl EventHandler for FileSearch {
 }
 
 #[derive(Default)]
-struct FuzzyMatch {
+pub struct FuzzyMatch {
     regions: Vec<(String, bool)>,
 }
 
