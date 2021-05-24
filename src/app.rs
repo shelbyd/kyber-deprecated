@@ -8,7 +8,7 @@ use tui::{
     Frame,
 };
 
-use crate::{control_flow::*, event_handling::*, file_search::*};
+use crate::{control_flow::*, event_handling::*, file_search::*, language_support::*};
 
 #[derive(Default)]
 struct Cursor {
@@ -56,14 +56,22 @@ impl Cursor {
     }
 }
 
-#[derive(Default)]
 pub struct App {
     file_search: Option<FileSearch>,
     contents: String,
     cursor: Cursor,
+    language_support: LanguageSupport,
 }
 
 impl App {
+    pub fn new(language_support: LanguageSupport) -> Self {
+        App {
+            language_support,
+            file_search: None,
+            contents: String::new(),
+            cursor: Cursor::default(),
+        }
+    }
     pub fn render<B: Backend>(&self, frame: &mut Frame<B>) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)

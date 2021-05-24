@@ -26,7 +26,7 @@ impl FileSearch {
         Walk::new(".")
             .into_iter()
             .filter_map(|entry| entry.ok())
-            .filter(|entry| entry.file_type().map(|f| f.is_file()).unwrap_or(false))
+            .filter(|entry| entry.file_type().map(|f| f.is_file()) == Some(true))
             .map(|entry| entry.into_path().into_os_string())
             .filter_map(|os_string| os_string.into_string().ok())
             .filter_map(move |path| FuzzyMatch::from_checked(path, &self.fuzzy_text))

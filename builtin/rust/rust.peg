@@ -1,0 +1,9 @@
+decl = mod | use;
+
+mod = mod_keyword _ws ident ';';
+
+mod_keyword = 'mod';
+
+ident = ('a'..'z' | 'A'..'Z' | '_')+
+
+_ws = (' ' | '\t' | '\n')+;

@@ -1,0 +1,8 @@
+{
+  "match_files": [
+    "*.rs"
+  ],
+  "highlight": {
+    "mod_keyword": "orange"
+  }
+}

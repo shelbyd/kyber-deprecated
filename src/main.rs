@@ -12,8 +12,13 @@ use event_handling::*;
 
 mod file_search;
 
+mod language_support;
+use language_support::*;
+
 fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
+
+    let mut app = App::new(LanguageSupport::load()?);
 
     let stdin = io::stdin();
     let mut events = stdin.events();
@@ -22,8 +27,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     let stdout = termion::input::MouseTerminal::from(stdout);
     let backend = tui::backend::TermionBackend::new(stdout);
     let mut terminal = tui::Terminal::new(backend)?;
-
-    let mut app = App::default();
 
     loop {
         terminal.draw(|f| {
