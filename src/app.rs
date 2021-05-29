@@ -1,6 +1,6 @@
 use termion::event::{Event, Key};
 use tui::{
-    layout::{Rect},
+    layout::Rect,
     style::{Color, Style},
     text::{Span, Spans},
     widgets::Paragraph,
@@ -57,6 +57,7 @@ impl Cursor {
 pub struct App {
     file_search: Option<FileSearch>,
     contents: String,
+    file_path: Option<String>,
     cursor: Cursor,
     language_support: LanguageSupport,
 }
@@ -67,6 +68,7 @@ impl App {
             language_support,
             file_search: None,
             contents: String::new(),
+            file_path: None,
             cursor: Cursor::default(),
         }
     }
@@ -120,7 +122,9 @@ pub fn render(app: &App) -> impl Render + '_ {
         0,
         CursorText {
             cursor: &app.cursor,
-            text: app.contents.as_ref(),
+            text: app
+                .language_support
+                .color(&app.contents, app.file_path.as_ref().map(AsRef::as_ref)),
         },
     );
     if let Some(s) = app.file_search.as_ref() {
@@ -132,20 +136,30 @@ pub fn render(app: &App) -> impl Render + '_ {
 
 struct CursorText<'a> {
     cursor: &'a Cursor,
-    text: &'a str,
+    text: ColoredText<'a>,
 }
 
 impl<'a> Render for CursorText<'a> {
     fn render(self: Box<Self>, rect: Rect, buffer: &mut tui::buffer::Buffer) {
         let (begin, end) = self.cursor.render_lines(rect);
-        let text = self
-            .text
-            .lines()
+        let text = spans_lines(&self.text)
             .skip(begin)
             .take(end - begin)
-            .map(|line| Spans::from(Span::raw(line)))
             .collect::<Vec<_>>();
         let p = Paragraph::new(text).style(Style::default().fg(Color::White).bg(Color::Black));
         tui::widgets::Widget::render(p, rect, buffer);
     }
+}
+
+fn spans_lines<'s>(colored: &'s ColoredText<'s>) -> impl Iterator<Item = Spans<'s>> {
+    colored.lines().map(|c| {
+        Spans::from(
+            c.into_iter()
+                .map(|(color, text)| Span {
+                    content: text.into(),
+                    style: Style::default().fg(color.map(Into::into).unwrap_or(Color::White)),
+                })
+                .collect::<Vec<_>>(),
+        )
+    })
 }

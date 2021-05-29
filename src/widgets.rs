@@ -18,12 +18,14 @@ impl<'w> Vertical<'w> {
     }
 
     pub fn min<R: Render + 'w>(mut self, amount: u16, render: R) -> Vertical<'w> {
-        self.constrained.push((Constraint::Min(amount), Box::new(render)));
+        self.constrained
+            .push((Constraint::Min(amount), Box::new(render)));
         self
     }
 
     pub fn length<R: Render + 'w>(mut self, amount: u16, render: R) -> Vertical<'w> {
-        self.constrained.push((Constraint::Length(amount), Box::new(render)));
+        self.constrained
+            .push((Constraint::Length(amount), Box::new(render)));
         self
     }
 }

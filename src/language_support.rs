@@ -55,12 +55,29 @@ impl LanguageSupport {
             .entry(language.to_string())
             .or_insert(Language::default())
     }
+
+    pub fn color<'s>(&self, contents: &'s str, file_path: Option<&str>) -> ColoredText<'s> {
+        file_path
+            .and_then(|p| self.language(p))
+            .map(|l| l.color(contents))
+            .unwrap_or_else(|| ColoredText::uncolored(contents))
+    }
+
+    fn language(&self, path: &str) -> Option<&Language> {
+        unimplemented!("language");
+    }
 }
 
 #[derive(Default)]
 struct Language {
     grammar: Option<Grammar>,
     config: Option<Config>,
+}
+
+impl Language {
+    fn color<'t>(&self, text: &'t str) -> ColoredText<'t> {
+        unimplemented!("color");
+    }
 }
 
 struct Grammar {}
@@ -118,8 +135,129 @@ impl<'de> Deserialize<'de> for Glob {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-enum Color {
+pub enum Color {
+    Blue,
     Orange,
+}
+
+impl Into<tui::style::Color> for Color {
+    fn into(self) -> tui::style::Color {
+        unimplemented!("into");
+    }
+}
+
+#[derive(Default, Debug, PartialEq, Eq, Clone)]
+pub struct ColoredText<'t> {
+    colored: Vec<(Option<Color>, &'t str)>,
+}
+
+impl<'t> ColoredText<'t> {
+    fn new(texts: &[(Option<Color>, &'t str)]) -> Self {
+        ColoredText {
+            colored: texts.iter().map(|(c, s)| (*c, *s)).collect(),
+        }
+    }
+
+    fn uncolored(text: &'t str) -> Self {
+        ColoredText {
+            colored: vec![(None, text)],
+        }
+    }
+
+    fn only(color: Option<Color>, text: &'t str) -> Self {
+        ColoredText {
+            colored: vec![(color, text)],
+        }
+    }
+
+    pub fn lines<'s>(&'s self) -> impl Iterator<Item = ColoredText<'s>> {
+        let mut lines = self.colored.iter().flat_map(|(color, text)| {
+            text.lines()
+                .enumerate()
+                .map(move |(i, l)| (i > 0, *color, l))
+        });
+
+        let mut current = None;
+        std::iter::from_fn(move || loop {
+            let (is_split, color, text) = match lines.next() {
+                Some(n) => n,
+                None => return current.take(),
+            };
+            if is_split {
+                return current.replace(ColoredText::only(color, text));
+            }
+            match current.as_mut() {
+                None => {
+                    current.replace(ColoredText::only(color, text));
+                }
+                Some(mut c) => c.colored.push((color, text)),
+            }
+        })
+    }
+
+    pub fn into_iter(self) -> impl Iterator<Item = (Option<Color>, &'t str)> {
+        self.colored.into_iter()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(test)]
+    mod colored_text {
+        use super::*;
+
+        #[test]
+        fn empty() {
+            assert_eq!(ColoredText::default().lines().next(), None);
+        }
+
+        #[test]
+        fn one_line() {
+            let text = ColoredText::uncolored("some text");
+            let mut iter = text.lines();
+
+            assert_eq!(iter.next(), Some(ColoredText::uncolored("some text")));
+            assert_eq!(iter.next(), None);
+        }
+
+        #[test]
+        fn multiple_lines() {
+            let text = ColoredText::uncolored("some text\nmore text");
+            let mut iter = text.lines();
+
+            assert_eq!(iter.next(), Some(ColoredText::uncolored("some text")));
+            assert_eq!(iter.next(), Some(ColoredText::uncolored("more text")));
+            assert_eq!(iter.next(), None);
+        }
+
+        #[test]
+        fn color_across_lines() {
+            let text = ColoredText::new(&[(Some(Color::Orange), "some text\nmore text")]);
+            let mut iter = text.lines();
+
+            assert_eq!(
+                iter.next(),
+                Some(ColoredText::only(Some(Color::Orange), "some text"))
+            );
+            assert_eq!(
+                iter.next(),
+                Some(ColoredText::only(Some(Color::Orange), "more text"))
+            );
+            assert_eq!(iter.next(), None);
+        }
+
+        #[test]
+        fn multiple_colors_one_line() {
+            let text =
+                ColoredText::new(&[(Some(Color::Orange), "some "), (Some(Color::Blue), "text")]);
+            let mut iter = text.lines();
+
+            assert_eq!(iter.next(), Some(text.clone()));
+            assert_eq!(iter.next(), None);
+        }
+    }
 }
