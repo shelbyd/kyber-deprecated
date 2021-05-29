@@ -1,3 +1,6 @@
+// TODO(shelbyd): Remove after implementing this file.
+#![allow(unused)]
+
 use serde::Deserialize;
 use std::{collections::HashMap, error::Error};
 

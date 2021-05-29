@@ -1,11 +1,9 @@
 use termion::event::{Event, Key};
 use tui::{
-    backend::Backend,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Rect},
     style::{Color, Style},
     text::{Span, Spans},
     widgets::Paragraph,
-    Frame,
 };
 
 use crate::{control_flow::*, event_handling::*, file_search::*, language_support::*, widgets::*};
@@ -72,37 +70,10 @@ impl App {
             cursor: Cursor::default(),
         }
     }
-    pub fn render<B: Backend>(&self, frame: &mut Frame<B>) {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(0),
-                Constraint::Length(
-                    self.file_search
-                        .as_ref()
-                        .map(|s| s.render_height())
-                        .unwrap_or(0),
-                ),
-            ])
-            .split(frame.size());
 
-        let (begin, end) = self.cursor.render_lines(chunks[0]);
-        let text = self
-            .contents
-            .lines()
-            .skip(begin)
-            .take(end - begin)
-            .map(|line| Spans::from(Span::raw(line)))
-            .collect::<Vec<_>>();
-        let p = Paragraph::new(text).style(Style::default().fg(Color::White).bg(Color::Black));
-        frame.render_widget(p, chunks[0]);
-
-        if let Some(search) = self.file_search.as_ref() {
-            let widget = crate::file_search::render(search);
-            widget.render_into(frame, chunks[1]);
-        }
-
-        frame.set_cursor(self.cursor.column as u16, (self.cursor.line - begin) as u16);
+    pub fn cursor(&self, rect: Rect) -> Option<(u16, u16)> {
+        let (begin, _) = self.cursor.render_lines(rect);
+        Some((self.cursor.column as u16, (self.cursor.line - begin) as u16))
     }
 }
 
@@ -135,5 +106,50 @@ impl EventHandler for App {
         }
 
         EventHandling::NotHandled
+    }
+}
+
+pub fn render(app: &App) -> impl Render + '_ {
+    let file_search_len = app
+        .file_search
+        .as_ref()
+        .map(|s| s.render_height())
+        .unwrap_or(0);
+
+    Vertical::new(vec![
+        (
+            Constraint::Min(0),
+            Box::new(CursorText {
+                cursor: &app.cursor,
+                text: app.contents.as_ref(),
+            }),
+        ),
+        (
+            Constraint::Length(file_search_len),
+            app.file_search
+                .as_ref()
+                .map(|s| Box::new(crate::file_search::render(s)) as Box<dyn Render>)
+                .unwrap_or(Box::new(Empty) as Box<dyn Render>),
+        ),
+    ])
+}
+
+struct CursorText<'a> {
+    cursor: &'a Cursor,
+    text: &'a str,
+}
+
+impl<'a> Render for CursorText<'a> {
+    fn render(self: Box<Self>, rect: Rect, buffer: &mut tui::buffer::Buffer) {
+        let (begin, end) = self.cursor.render_lines(rect);
+        let text = self
+            .text
+            .lines()
+            .skip(begin)
+            .take(end - begin)
+            .map(|line| Spans::from(Span::raw(line)))
+            .collect::<Vec<_>>();
+        let p = Paragraph::new(text).style(Style::default().fg(Color::White).bg(Color::Black));
+        tui::widgets::Widget::render(p, rect, buffer);
     }
 }

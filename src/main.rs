@@ -16,6 +16,7 @@ mod language_support;
 use language_support::*;
 
 mod widgets;
+use widgets::*;
 
 fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
@@ -32,7 +33,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     loop {
         terminal.draw(|f| {
-            app.render(f);
+            let widget = crate::app::render(&app);
+            widget.render_into(f, f.size());
+            if let Some((x, y)) = app.cursor(f.size()) {
+                f.set_cursor(x, y);
+            }
         })?;
 
         let event = match events.next() {

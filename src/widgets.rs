@@ -56,3 +56,9 @@ where
         Widget::render(*self, rect, buffer)
     }
 }
+
+pub struct Empty;
+
+impl Render for Empty {
+    fn render(self: Box<Self>, _: Rect, _: &mut Buffer) {}
+}
