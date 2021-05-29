@@ -88,7 +88,8 @@ impl EventHandler for App {
             if let ControlFlow::Break(file) = flow {
                 self.file_search = None;
                 if let Some(path) = file {
-                    self.contents = std::fs::read_to_string(path).unwrap();
+                    self.contents = std::fs::read_to_string(&path).unwrap();
+                    self.file_path = Some(path);
                     self.cursor = Cursor::default();
                 }
             }

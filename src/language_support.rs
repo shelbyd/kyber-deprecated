@@ -64,7 +64,11 @@ impl LanguageSupport {
     }
 
     fn language(&self, path: &str) -> Option<&Language> {
-        unimplemented!("language");
+        self.languages
+            .iter()
+            .filter(|(_, lang)| lang.matches(path))
+            .map(|(_, lang)| lang)
+            .next()
     }
 }
 
@@ -76,7 +80,20 @@ struct Language {
 
 impl Language {
     fn color<'t>(&self, text: &'t str) -> ColoredText<'t> {
+        let (grammar, config) = match (self.grammar.as_ref(), self.config.as_ref()) {
+            (Some(g), Some(c)) => (g, c),
+            _ => return ColoredText::uncolored(text),
+        };
+        // TODO(shelbyd): Actually color text.
+        return ColoredText::uncolored(text);
         unimplemented!("color");
+    }
+
+    fn matches(&self, path: &str) -> bool {
+        self.config
+            .as_ref()
+            .map(|c| c.matches_file(path))
+            .unwrap_or(false)
     }
 }
 
@@ -99,6 +116,10 @@ struct Config {
 impl Config {
     fn parse(file: String) -> Result<Self, Box<dyn Error>> {
         Ok(serde_json::from_str(&file)?)
+    }
+
+    fn matches_file(&self, path: &str) -> bool {
+        self.match_files.iter().any(|glob| glob.0.matches(path))
     }
 }
 
