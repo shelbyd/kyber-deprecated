@@ -15,6 +15,8 @@ mod file_search;
 mod language_support;
 use language_support::*;
 
+mod widgets;
+
 fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
 

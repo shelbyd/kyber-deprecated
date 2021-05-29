@@ -8,7 +8,7 @@ use tui::{
     Frame,
 };
 
-use crate::{control_flow::*, event_handling::*, file_search::*, language_support::*};
+use crate::{control_flow::*, event_handling::*, file_search::*, language_support::*, widgets::*};
 
 #[derive(Default)]
 struct Cursor {
@@ -98,7 +98,8 @@ impl App {
         frame.render_widget(p, chunks[0]);
 
         if let Some(search) = self.file_search.as_ref() {
-            search.render(frame, chunks[1]);
+            let widget = crate::file_search::render(search);
+            widget.render_into(frame, chunks[1]);
         }
 
         frame.set_cursor(self.cursor.column as u16, (self.cursor.line - begin) as u16);

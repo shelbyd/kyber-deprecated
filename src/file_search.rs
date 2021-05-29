@@ -1,14 +1,12 @@
 use termion::event::{Event, Key};
 use tui::{
-    backend::Backend,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::Constraint,
     style::{Color, Style},
     text::{Span, Spans, Text},
     widgets::{List, ListItem, Paragraph},
-    Frame,
 };
 
-use crate::{control_flow::*, event_handling::*};
+use crate::{control_flow::*, event_handling::*, widgets::*};
 
 #[derive(Default)]
 pub struct FileSearch {
@@ -32,28 +30,25 @@ impl FileSearch {
             .filter_map(move |path| FuzzyMatch::from_checked(path, &self.fuzzy_text))
             .take(5)
     }
+}
 
-    pub fn render<B: Backend>(&self, frame: &mut Frame<B>, size: Rect) {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(1)])
-            .split(size);
+pub fn render(search: &FileSearch) -> impl crate::widgets::Render + '_ {
+    let items = search
+        .suggestions()
+        .map(|s| ListItem::new(s))
+        .collect::<Vec<_>>();
+    let list = List::new(items);
 
-        let items = self
-            .suggestions()
-            .map(|s| ListItem::new(s))
-            .collect::<Vec<_>>();
-        let list = List::new(items);
-        frame.render_widget(list, chunks[0]);
+    let search_text = Spans::from(vec![
+        Span::styled(">>> ", Style::default().fg(Color::Blue)),
+        Span::raw(&search.fuzzy_text),
+    ]);
+    let p = Paragraph::new(search_text).style(Style::default().fg(Color::White).bg(Color::Black));
 
-        let search_text = vec![Spans::from(vec![
-            Span::styled(">>> ", Style::default().fg(Color::Blue)),
-            Span::raw(&self.fuzzy_text),
-        ])];
-        let p =
-            Paragraph::new(search_text).style(Style::default().fg(Color::White).bg(Color::Black));
-        frame.render_widget(p, chunks[1]);
-    }
+    Vertical::new(vec![
+        (Constraint::Min(0), Box::new(list)),
+        (Constraint::Length(1), Box::new(p)),
+    ])
 }
 
 impl EventHandler for FileSearch {

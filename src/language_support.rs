@@ -82,7 +82,7 @@ impl Config {
     }
 }
 
-struct Glob( glob::Pattern);
+struct Glob(glob::Pattern);
 
 impl<'de> Deserialize<'de> for Glob {
     fn deserialize<D>(de: D) -> Result<Self, <D as serde::Deserializer<'de>>::Error>
@@ -105,9 +105,8 @@ impl<'de> Deserialize<'de> for Glob {
             where
                 E: serde::de::Error,
             {
-                let pat = glob::Pattern::new(s).map_err(|_| {
-                    Error::invalid_value(Unexpected::Str(s), &self)
-                })?;
+                let pat = glob::Pattern::new(s)
+                    .map_err(|_| Error::invalid_value(Unexpected::Str(s), &self))?;
                 Ok(Glob(pat))
             }
         }
@@ -119,5 +118,5 @@ impl<'de> Deserialize<'de> for Glob {
 #[derive(Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum Color {
-    Orange
+    Orange,
 }
