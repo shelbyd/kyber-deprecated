@@ -1,6 +1,6 @@
 use termion::event::{Event, Key};
 use tui::{
-    layout::{Constraint, Rect},
+    layout::{Rect},
     style::{Color, Style},
     text::{Span, Spans},
     widgets::Paragraph,
@@ -116,22 +116,18 @@ pub fn render(app: &App) -> impl Render + '_ {
         .map(|s| s.render_height())
         .unwrap_or(0);
 
-    Vertical::new(vec![
-        (
-            Constraint::Min(0),
-            Box::new(CursorText {
-                cursor: &app.cursor,
-                text: app.contents.as_ref(),
-            }),
-        ),
-        (
-            Constraint::Length(file_search_len),
-            app.file_search
-                .as_ref()
-                .map(|s| Box::new(crate::file_search::render(s)) as Box<dyn Render>)
-                .unwrap_or(Box::new(Empty) as Box<dyn Render>),
-        ),
-    ])
+    let mut vertical = Vertical::new().min(
+        0,
+        CursorText {
+            cursor: &app.cursor,
+            text: app.contents.as_ref(),
+        },
+    );
+    if let Some(s) = app.file_search.as_ref() {
+        let render = crate::file_search::render(s);
+        vertical = vertical.length(file_search_len, render);
+    }
+    vertical
 }
 
 struct CursorText<'a> {

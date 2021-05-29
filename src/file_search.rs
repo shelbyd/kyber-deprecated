@@ -1,6 +1,5 @@
 use termion::event::{Event, Key};
 use tui::{
-    layout::Constraint,
     style::{Color, Style},
     text::{Span, Spans, Text},
     widgets::{List, ListItem, Paragraph},
@@ -45,10 +44,7 @@ pub fn render(search: &FileSearch) -> impl crate::widgets::Render + '_ {
     ]);
     let p = Paragraph::new(search_text).style(Style::default().fg(Color::White).bg(Color::Black));
 
-    Vertical::new(vec![
-        (Constraint::Min(0), Box::new(list)),
-        (Constraint::Length(1), Box::new(p)),
-    ])
+    Vertical::new().min(0, list).length(1, p)
 }
 
 impl EventHandler for FileSearch {

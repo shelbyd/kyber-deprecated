@@ -11,10 +11,20 @@ pub struct Vertical<'w> {
 }
 
 impl<'w> Vertical<'w> {
-    pub fn new(constrained_widgets: Vec<(Constraint, Box<dyn Render + 'w>)>) -> Self {
+    pub fn new() -> Self {
         Self {
-            constrained: constrained_widgets,
+            constrained: Vec::new(),
         }
+    }
+
+    pub fn min<R: Render + 'w>(mut self, amount: u16, render: R) -> Vertical<'w> {
+        self.constrained.push((Constraint::Min(amount), Box::new(render)));
+        self
+    }
+
+    pub fn length<R: Render + 'w>(mut self, amount: u16, render: R) -> Vertical<'w> {
+        self.constrained.push((Constraint::Length(amount), Box::new(render)));
+        self
     }
 }
 
