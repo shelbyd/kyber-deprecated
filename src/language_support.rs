@@ -4,6 +4,9 @@
 use serde::Deserialize;
 use std::{collections::HashMap, error::Error};
 
+mod grammar;
+use grammar::*;
+
 #[derive(Default)]
 pub struct LanguageSupport {
     languages: HashMap<String, Language>,
@@ -33,7 +36,8 @@ impl LanguageSupport {
             match file.path().extension().and_then(|ext| ext.to_str()) {
                 Some("peg") => {
                     log::debug!("loading peg file '{}'", file.path().display());
-                    let grammar = Grammar::parse(std::fs::read_to_string(file.path())?)?;
+                    let contents = std::fs::read_to_string(file.path())?;
+                    let grammar = Grammar::from_file(&contents).unwrap();
                     support.entry(stem).grammar = Some(grammar);
                 }
                 Some("json") => {
@@ -56,7 +60,7 @@ impl LanguageSupport {
             .or_insert(Language::default())
     }
 
-    pub fn color<'s>(&self, contents: &'s str, file_path: Option<&str>) -> ColoredText<'s> {
+    pub fn color<'s>(&'s self, contents: &'s str, file_path: Option<&str>) -> ColoredText<'s> {
         file_path
             .and_then(|p| self.language(p))
             .map(|l| l.color(contents))
@@ -79,14 +83,26 @@ struct Language {
 }
 
 impl Language {
-    fn color<'t>(&self, text: &'t str) -> ColoredText<'t> {
+    fn color<'t>(&'t self, text: &'t str) -> ColoredText<'t> {
         let (grammar, config) = match (self.grammar.as_ref(), self.config.as_ref()) {
             (Some(g), Some(c)) => (g, c),
             _ => return ColoredText::uncolored(text),
         };
-        // TODO(shelbyd): Actually color text.
-        return ColoredText::uncolored(text);
-        unimplemented!("color");
+        let parsed = match grammar.parse(text) {
+            Some(p) => p,
+            None => return ColoredText::uncolored(text),
+        };
+        parsed
+            .rule_stacks()
+            .map(|(stack, text)| {
+                let color = stack
+                    .iter()
+                    .rev()
+                    .filter_map(|rule| config.color_for(rule))
+                    .next();
+                (color, text)
+            })
+            .collect()
     }
 
     fn matches(&self, path: &str) -> bool {
@@ -94,15 +110,6 @@ impl Language {
             .as_ref()
             .map(|c| c.matches_file(path))
             .unwrap_or(false)
-    }
-}
-
-struct Grammar {}
-
-impl Grammar {
-    fn parse(file: String) -> Result<Self, Box<dyn Error>> {
-        // TODO(shelbyd): Implement grammar parsing.
-        Ok(Grammar {})
     }
 }
 
@@ -120,6 +127,10 @@ impl Config {
 
     fn matches_file(&self, path: &str) -> bool {
         self.match_files.iter().any(|glob| glob.0.matches(path))
+    }
+
+    fn color_for(&self, rule: &str) -> Option<Color> {
+        unimplemented!("color_for");
     }
 }
 
@@ -220,6 +231,17 @@ impl<'t> ColoredText<'t> {
 
     pub fn into_iter(self) -> impl Iterator<Item = (Option<Color>, &'t str)> {
         self.colored.into_iter()
+    }
+}
+
+impl<'s> core::iter::FromIterator<(Option<Color>, &'s str)> for ColoredText<'s> {
+    fn from_iter<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = (Option<Color>, &'s str)>,
+    {
+        ColoredText {
+            colored: iter.into_iter().collect(),
+        }
     }
 }
 
