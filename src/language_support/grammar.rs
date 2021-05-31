@@ -1,8 +1,8 @@
 use nom::{
     branch::alt,
-    bytes::complete::tag,
-    character::complete::{alpha1, anychar, multispace0},
-    combinator::recognize,
+    bytes::complete::{escaped_transform, tag, take_until},
+    character::complete::{alpha1, anychar, multispace0, none_of},
+    combinator::{eof, recognize, value},
     multi::{many0, many1, separated_list1},
     sequence::{delimited, separated_pair, terminated, tuple},
     IResult,
@@ -30,15 +30,30 @@ impl Grammar {
     }
 
     pub fn parse<'t>(&'t self, file: &'t str) -> Option<ParsedFile<'t>> {
-        let (file, rule) = self
-            .order
-            .iter()
-            .filter_map(|ident| {
-                let rule = &self.rules[ident];
-                rule.parse(file, ident, &self.rules)
-            })
-            .next()?;
-        Some(rule)
+        let mut result = None;
+        let mut contents = file;
+
+        loop {
+            let parsed = self
+                .order
+                .iter()
+                .filter_map(|ident| {
+                    let rule = &self.rules[ident];
+                    rule.parse(contents, ident, &self.rules)
+                })
+                .next();
+            match (parsed, result.as_mut()) {
+                (Some((remaining_contents, parsed)), None) => {
+                    result = Some(parsed);
+                    contents = remaining_contents;
+                }
+                (Some((remaining_contents, parsed)), Some(mut already_parsed)) => {
+                    already_parsed.append(parsed);
+                    contents = remaining_contents;
+                }
+                (None, _) => return result,
+            }
+        }
     }
 }
 
@@ -46,6 +61,8 @@ type Span<'a> = LocatedSpan<&'a str, RecursiveInfo>;
 
 fn rules(s: Span) -> IResult<Span, Vec<(Span, Expr)>> {
     let (s, rules) = many0(delimited(multispace0, rule, tag(";")))(s)?;
+    let (s, _) = multispace0(s)?;
+    let (s, _) = eof(s)?;
 
     Ok((s, rules))
 }
@@ -65,7 +82,15 @@ fn ident(s: Span) -> IResult<Span, Span> {
 }
 
 fn expr(s: Span) -> IResult<Span, Expr> {
-    let (s, expr) = alt((one_of, one_or_more, parens, rule_expr, char_range))(s)?;
+    let (s, expr) = alt((
+        one_of,
+        one_or_more,
+        sequence,
+        parens,
+        rule_expr,
+        char_range,
+        exact_string,
+    ))(s)?;
 
     Ok((s, expr))
 }
@@ -90,6 +115,23 @@ fn char_range(s: Span) -> IResult<Span, Expr> {
     Ok((s, Expr::CharRange(start, end)))
 }
 
+fn exact_string(s: Span) -> IResult<Span, Expr> {
+    let (s, _) = tag("'")(s)?;
+    let (s, string) = escaped_transform(
+        none_of("'\\"),
+        '\\',
+        alt((
+            value("\n", tag("n")),
+            value("\t", tag("t")),
+            value("\r", tag("r")),
+            value("'", tag("'")),
+        )),
+    )(s)?;
+    let (s, _) = tag("'")(s)?;
+
+    Ok((s, Expr::String(string.to_string())))
+}
+
 fn char_(s: Span) -> IResult<Span, char> {
     delimited(tag("'"), anychar, tag("'"))(s)
 }
@@ -104,6 +146,15 @@ fn one_of(s: Span) -> IResult<Span, Expr> {
 }
 
 #[recursive_parser]
+fn sequence(s: Span) -> IResult<Span, Expr> {
+    let (s, expr0) = expr(s)?;
+    let (s, _) = tag(" ")(s)?;
+    let (s, expr1) = expr(s)?;
+
+    Ok((s, Expr::Sequence(Box::new(expr0), Box::new(expr1))))
+}
+
+#[recursive_parser]
 fn one_or_more(s: Span) -> IResult<Span, Expr> {
     let (s, expr) = terminated(expr, tag("+"))(s)?;
 
@@ -113,8 +164,10 @@ fn one_or_more(s: Span) -> IResult<Span, Expr> {
 #[derive(Debug)]
 enum Expr {
     Rule(String),
+    String(String),
     CharRange(char, char),
     OneOf(Box<Expr>, Box<Expr>),
+    Sequence(Box<Expr>, Box<Expr>),
     OneOrMore(Box<Expr>),
 }
 
@@ -126,6 +179,10 @@ impl Expr {
         rules: &'i HashMap<String, Expr>,
     ) -> Option<(&'i str, ParsedFile<'i>)> {
         match self {
+            Expr::String(s) => {
+                let input = input.strip_prefix(s)?;
+                Some((input, ParsedFile::new(my_name, s)))
+            }
             Expr::CharRange(start, end) => {
                 let mut chars = input.char_indices();
                 let (index, char_) = chars.next()?;
@@ -153,6 +210,12 @@ impl Expr {
             Expr::OneOf(expr0, expr1) => expr0
                 .parse(input, my_name, rules)
                 .or_else(|| expr1.parse(input, my_name, rules)),
+            Expr::Sequence(expr0, expr1) => {
+                let (input, mut parsed0) = expr0.parse(input, my_name, rules)?;
+                let (input, parsed1) = expr1.parse(input, my_name, rules)?;
+                parsed0.append(parsed1);
+                Some((input, parsed0))
+            }
             expr => unimplemented!("{:?}", expr),
         }
     }
@@ -187,7 +250,31 @@ impl<'t> ParsedFile<'t> {
     }
 
     fn append(&mut self, other: ParsedFile<'t>) {
-        self.regions.extend(other.regions)
+        self.regions.extend(other.regions);
+        self.collapse();
+    }
+
+    fn collapse(&mut self) {
+        let mut new_vec = Vec::with_capacity(self.regions.len());
+        let mut existing_drain = self.regions.drain(..);
+
+        loop {
+            match (new_vec.last_mut(), existing_drain.next()) {
+                (None, Some(drain)) => {
+                    new_vec.push(drain);
+                }
+                (Some(last), Some(drain)) => match last.try_include(drain) {
+                    Some(not_included) => {
+                        new_vec.push(not_included);
+                    }
+                    None => {}
+                },
+                (_, None) => break,
+            }
+        }
+
+        drop(existing_drain);
+        self.regions = new_vec;
     }
 }
 
@@ -218,6 +305,27 @@ impl<'t> Region<'t> {
 
     fn push_rule(&mut self, rule: &'t str) {
         self.rules.insert(0, rule)
+    }
+
+    fn try_include(&mut self, other: Region<'t>) -> Option<Region<'t>> {
+        if self.rules != other.rules {
+            return Some(other);
+        }
+        if let Some(t) = join_strs(self.text, other.text) {
+            self.text = t;
+            return None;
+        }
+        return Some(other);
+    }
+}
+
+fn join_strs<'s>(s0: &'s str, s1: &'s str) -> Option<&'s str> {
+    unsafe {
+        if s0.as_ptr().add(s0.len()) != s1.as_ptr() {
+            return None;
+        }
+        let slice = std::slice::from_raw_parts(s0.as_ptr(), s0.len() + s1.len());
+        std::str::from_utf8(slice).ok()
     }
 }
 
@@ -253,9 +361,7 @@ mod tests {
         let file = grammar.parse("345").unwrap();
 
         let mut stacks = file.rule_stacks();
-        assert_eq!(stacks.next(), Some((&["num", "digit"][..], "3")));
-        assert_eq!(stacks.next(), Some((&["num", "digit"][..], "4")));
-        assert_eq!(stacks.next(), Some((&["num", "digit"][..], "5")));
+        assert_eq!(stacks.next(), Some((&["num", "digit"][..], "345")));
         assert_eq!(stacks.next(), None);
     }
 
@@ -290,8 +396,107 @@ mod tests {
 
         let mut stacks = file.rule_stacks();
         assert_eq!(stacks.next(), Some((&["hex", "digit"][..], "3")));
-        assert_eq!(stacks.next(), Some((&["hex", "alpha"][..], "a")));
-        assert_eq!(stacks.next(), Some((&["hex", "alpha"][..], "e")));
+        assert_eq!(stacks.next(), Some((&["hex", "alpha"][..], "ae")));
         assert_eq!(stacks.next(), None);
+    }
+
+    #[test]
+    fn exact_string() {
+        let grammar = Grammar::from_file(
+            r"
+            abc = 'abc';
+        ",
+        )
+        .unwrap();
+        let file = grammar.parse("abc").unwrap();
+
+        let mut stacks = file.rule_stacks();
+        assert_eq!(stacks.next(), Some((&["abc"][..], "abc")));
+        assert_eq!(stacks.next(), None);
+    }
+
+    #[test]
+    fn sequence() {
+        let grammar = Grammar::from_file(
+            r"
+            abc = 'a' b c;
+            b = 'b';
+            c = 'c';
+        ",
+        )
+        .unwrap();
+        let file = grammar.parse("abc").unwrap();
+
+        let mut stacks = file.rule_stacks();
+        assert_eq!(stacks.next(), Some((&["abc"][..], "a")));
+        assert_eq!(stacks.next(), Some((&["abc", "b"][..], "b")));
+        assert_eq!(stacks.next(), Some((&["abc", "c"][..], "c")));
+        assert_eq!(stacks.next(), None);
+    }
+
+    #[test]
+    fn control_characters() {
+        let grammar = Grammar::from_file(
+            r"
+            newline = '\n';
+            quote = '\'';
+            tab = '\t';
+        ",
+        )
+        .unwrap();
+        let file = grammar.parse("\n\'\t").unwrap();
+
+        let mut stacks = file.rule_stacks();
+        assert_eq!(stacks.next(), Some((&["newline"][..], "\n")));
+        assert_eq!(stacks.next(), Some((&["quote"][..], "'")));
+        assert_eq!(stacks.next(), Some((&["tab"][..], "\t")));
+        assert_eq!(stacks.next(), None);
+    }
+
+    #[test]
+    fn rust_ident() {
+        let grammar = Grammar::from_file(
+            r"
+            ident = ('a'..'z' | 'A'..'Z' | '_')+;
+        ",
+        )
+        .unwrap();
+        let file = grammar.parse("foobar").unwrap();
+
+        let mut stacks = file.rule_stacks();
+        assert_eq!(stacks.next(), Some((&["ident"][..], "foobar")));
+        assert_eq!(stacks.next(), None);
+    }
+
+    #[cfg(test)]
+    mod join_strs {
+        use super::*;
+
+        #[macro_use]
+        use quickcheck_macros::*;
+
+        #[quickcheck]
+        fn good_strs(s: String, index: usize) -> bool {
+            if !s.is_char_boundary(index) {
+                return true;
+            }
+            let (left, right) = s.split_at(index);
+            join_strs(left, right).is_some()
+        }
+
+        #[quickcheck]
+        fn bad_strs(s0: String, s1: String) -> bool {
+            join_strs(&s0, &s1).is_none()
+        }
+
+        #[quickcheck]
+        fn good_strs_value(s: String, index: usize) -> bool {
+            if !s.is_char_boundary(index) {
+                return true;
+            }
+            let (left, right) = s.split_at(index);
+            let joined = join_strs(left, right).unwrap();
+            joined == s
+        }
     }
 }

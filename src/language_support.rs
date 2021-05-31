@@ -130,7 +130,8 @@ impl Config {
     }
 
     fn color_for(&self, rule: &str) -> Option<Color> {
-        unimplemented!("color_for");
+        // TODO(shelbyd): Implement.
+        None
     }
 }
 
