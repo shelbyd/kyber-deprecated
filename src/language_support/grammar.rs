@@ -3,9 +3,10 @@ use nom::{
     bytes::complete::{escaped_transform, tag, take_until},
     character::complete::{alpha1, anychar, multispace0, none_of},
     combinator::{eof, recognize, value},
+    error::ParseError,
     multi::{many0, many1, separated_list1},
     sequence::{delimited, separated_pair, terminated, tuple},
-    IResult,
+    IResult, Parser,
 };
 use nom_locate::LocatedSpan;
 use nom_recursive::{recursive_parser, RecursiveInfo};
@@ -77,7 +78,7 @@ impl Grammar {
 type Span<'a> = LocatedSpan<&'a str, RecursiveInfo>;
 
 fn rules(s: Span) -> IResult<Span, Vec<(Span, Expr)>> {
-    let (s, rules) = many0(delimited(multispace0, rule, tag(";")))(s)?;
+    let (s, rules) = many0(delimited(multispace0, rule, ws_around(tag(";"))))(s)?;
     let (s, _) = multispace0(s)?;
     let (s, _) = eof(s)?;
 
@@ -86,10 +87,24 @@ fn rules(s: Span) -> IResult<Span, Vec<(Span, Expr)>> {
 
 fn rule(s: Span) -> IResult<Span, (Span, Expr)> {
     let (s, ident) = ident(s)?;
-    let (s, _) = tag(" = ")(s)?;
+    let (s, _) = ws_around(tag("="))(s)?;
     let (s, expr) = expr(s)?;
 
     Ok((s, (ident, expr)))
+}
+
+fn ws_around<I: Clone, O, E: ParseError<I>, F>(mut f: F) -> impl FnMut(I) -> IResult<I, O, E>
+where
+    F: Parser<I, O, E>,
+    I: nom::InputTakeAtPosition,
+    <I as nom::InputTakeAtPosition>::Item: nom::AsChar + Clone,
+{
+    move |input: I| {
+        let (input, _) = multispace0(input)?;
+        let (input, result) = f.parse(input)?;
+        let (input, _) = multispace0(input)?;
+        Ok((input, result))
+    }
 }
 
 fn ident(s: Span) -> IResult<Span, Span> {
@@ -156,7 +171,7 @@ fn char_(s: Span) -> IResult<Span, char> {
 #[recursive_parser]
 fn one_of(s: Span) -> IResult<Span, Expr> {
     let (s, expr0) = expr(s)?;
-    let (s, _) = tag(" | ")(s)?;
+    let (s, _) = ws_around(tag("|"))(s)?;
     let (s, expr1) = expr(s)?;
 
     Ok((s, Expr::OneOf(Box::new(expr0), Box::new(expr1))))
@@ -532,6 +547,43 @@ mod tests {
         assert_eq!(stacks.next(), Some((&[][..], "def\n")));
         assert_eq!(stacks.next(), Some((&["abc"][..], "abc")));
         assert_eq!(stacks.next(), Some((&[][..], "\ndef")));
+        assert_eq!(stacks.next(), None);
+    }
+
+    #[test]
+    fn newline_rule() {
+        let grammar = Grammar::from_file(
+            r"
+            abc =
+                'abc';
+        ",
+        )
+        .unwrap();
+        let file = grammar.parse("abc").unwrap();
+
+        let mut stacks = file.rule_stacks();
+        assert_eq!(stacks.next(), Some((&["abc"][..], "abc")));
+        assert_eq!(stacks.next(), None);
+    }
+
+    #[test]
+    fn multiline_or() {
+        let grammar = Grammar::from_file(
+            r"
+            abc =
+                'a'
+                | 'b'
+                | 'c'
+                ;
+        ",
+        )
+        .unwrap();
+        let file = grammar.parse("abc").unwrap();
+
+        let mut stacks = file.rule_stacks();
+        assert_eq!(stacks.next(), Some((&["abc"][..], "a")));
+        assert_eq!(stacks.next(), Some((&["abc"][..], "b")));
+        assert_eq!(stacks.next(), Some((&["abc"][..], "c")));
         assert_eq!(stacks.next(), None);
     }
 

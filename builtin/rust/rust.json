@@ -3,6 +3,10 @@
     "*.rs"
   ],
   "highlight": {
-    "mod_keyword": "orange"
+    "keyword_mod": "orange",
+    "keyword_use": "orange",
+    "keyword_super": "orange",
+    "keyword_self": "red",
+    "keyword_crate": "yellow"
   }
 }

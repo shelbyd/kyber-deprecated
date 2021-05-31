@@ -172,6 +172,8 @@ impl<'de> Deserialize<'de> for Glob {
 pub enum Color {
     Blue,
     Orange,
+    Red,
+    Yellow,
 }
 
 impl Into<tui::style::Color> for Color {
@@ -179,6 +181,8 @@ impl Into<tui::style::Color> for Color {
         match self {
             Color::Blue => tui::style::Color::Blue,
             Color::Orange => tui::style::Color::Rgb(255, 103, 0),
+            Color::Red => tui::style::Color::Red,
+            Color::Yellow => tui::style::Color::Yellow,
         }
     }
 }
