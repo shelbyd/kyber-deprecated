@@ -51,9 +51,26 @@ impl Grammar {
                     already_parsed.append(parsed);
                     contents = remaining_contents;
                 }
-                (None, _) => return result,
+                (None, None) if contents != "" => {
+                    let boundary = (1..)
+                        .filter(|i| contents.is_char_boundary(*i))
+                        .next()
+                        .unwrap();
+                    result = Some(ParsedFile::empty(&contents[..boundary]));
+                    contents = &contents[boundary..];
+                }
+                (None, Some(result)) if contents != "" => {
+                    let boundary = (1..)
+                        .filter(|i| contents.is_char_boundary(*i))
+                        .next()
+                        .unwrap();
+                    result.append(ParsedFile::empty(&contents[..boundary]));
+                    contents = &contents[boundary..];
+                }
+                (None, _) => break,
             }
         }
+        return result;
     }
 }
 
@@ -465,6 +482,56 @@ mod tests {
 
         let mut stacks = file.rule_stacks();
         assert_eq!(stacks.next(), Some((&["ident"][..], "foobar")));
+        assert_eq!(stacks.next(), None);
+    }
+
+    #[test]
+    fn incomplete_parse() {
+        let grammar = Grammar::from_file(
+            r"
+            abc = 'abc';
+        ",
+        )
+        .unwrap();
+        let file = grammar.parse("abcdef").unwrap();
+
+        let mut stacks = file.rule_stacks();
+        assert_eq!(stacks.next(), Some((&["abc"][..], "abc")));
+        assert_eq!(stacks.next(), Some((&[][..], "def")));
+        assert_eq!(stacks.next(), None);
+    }
+
+    #[test]
+    fn middle_parse() {
+        let grammar = Grammar::from_file(
+            r"
+            abc = 'abc';
+        ",
+        )
+        .unwrap();
+        let file = grammar.parse("defabcdef").unwrap();
+
+        let mut stacks = file.rule_stacks();
+        assert_eq!(stacks.next(), Some((&[][..], "def")));
+        assert_eq!(stacks.next(), Some((&["abc"][..], "abc")));
+        assert_eq!(stacks.next(), Some((&[][..], "def")));
+        assert_eq!(stacks.next(), None);
+    }
+
+    #[test]
+    fn newlines() {
+        let grammar = Grammar::from_file(
+            r"
+            abc = 'abc';
+        ",
+        )
+        .unwrap();
+        let file = grammar.parse("def\nabc\ndef").unwrap();
+
+        let mut stacks = file.rule_stacks();
+        assert_eq!(stacks.next(), Some((&[][..], "def\n")));
+        assert_eq!(stacks.next(), Some((&["abc"][..], "abc")));
+        assert_eq!(stacks.next(), Some((&[][..], "\ndef")));
         assert_eq!(stacks.next(), None);
     }
 

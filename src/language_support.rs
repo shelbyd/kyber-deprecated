@@ -130,8 +130,7 @@ impl Config {
     }
 
     fn color_for(&self, rule: &str) -> Option<Color> {
-        // TODO(shelbyd): Implement.
-        None
+        self.highlight.get(rule).cloned()
     }
 }
 
@@ -177,7 +176,10 @@ pub enum Color {
 
 impl Into<tui::style::Color> for Color {
     fn into(self) -> tui::style::Color {
-        unimplemented!("into");
+        match self {
+            Color::Blue => tui::style::Color::Blue,
+            Color::Orange => tui::style::Color::Rgb(255, 103, 0),
+        }
     }
 }
 
@@ -209,7 +211,7 @@ impl<'t> ColoredText<'t> {
         let mut lines = self.colored.iter().flat_map(|(color, text)| {
             text.lines()
                 .enumerate()
-                .map(move |(i, l)| (i > 0, *color, l))
+                .map(move |(i, l)| (i > 0 || *text == "\n", *color, l))
         });
 
         let mut current = None;
@@ -301,6 +303,19 @@ mod tests {
             let mut iter = text.lines();
 
             assert_eq!(iter.next(), Some(text.clone()));
+            assert_eq!(iter.next(), None);
+        }
+
+        #[test]
+        fn multiple_regions_with_line() {
+            let text = ColoredText::new(&[(None, "some text"), (None, "\n"), (None, "more text")]);
+            let mut iter = text.lines();
+
+            assert_eq!(iter.next(), Some(ColoredText::only(None, "some text")));
+            assert_eq!(
+                iter.next(),
+                Some(ColoredText::new(&[(None, ""), (None, "more text")]))
+            );
             assert_eq!(iter.next(), None);
         }
     }
