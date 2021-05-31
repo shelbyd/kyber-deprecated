@@ -9,9 +9,9 @@ _ws = (' ' | '\t' | '\n')+;
 use = keyword_use _ws use_tree ';';
 
 use_tree =
-    (simple_path? '::')?*
-  | (simple_path? '::')? { (use_tree (',' use_tree)* ','?)? }
-  | simple_path (as (ident | _))?
+    (simple_path? '::')? '*'
+  | (simple_path? '::')? '{' (use_tree (',' use_tree)* ','?)? '}'
+  | simple_path ('as' (ident | '_'))?
   ;
 
 simple_path = '::'? simple_path_segment ('::' simple_path_segment)*;

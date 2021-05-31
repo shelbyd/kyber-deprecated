@@ -37,7 +37,7 @@ impl LanguageSupport {
                 Some("peg") => {
                     log::debug!("loading peg file '{}'", file.path().display());
                     let contents = std::fs::read_to_string(file.path())?;
-                    let grammar = Grammar::from_file(&contents).unwrap();
+                    let grammar = Grammar::from_file(&contents)?;
                     support.entry(stem).grammar = Some(grammar);
                 }
                 Some("json") => {

@@ -14,6 +14,7 @@ env_logger = "0.8"
 glob = "0.3"
 nom = "6.1"
 nom_locate = "3.0"
+nom-greedyerror = "0.3"
 nom-recursive = "0.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

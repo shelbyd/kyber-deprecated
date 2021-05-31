@@ -1,12 +1,12 @@
 use nom::{
     branch::alt,
     bytes::complete::{escaped_transform, tag, take_until},
-    character::complete::{alpha1, anychar, multispace0, none_of},
+    character::complete::{alpha1, anychar, multispace0, multispace1, none_of},
     combinator::{eof, recognize, value},
-    error::ParseError,
+    error::{convert_error, ParseError, VerboseError},
     multi::{many0, many1, separated_list1},
     sequence::{delimited, separated_pair, terminated, tuple},
-    IResult, Parser,
+    Parser,
 };
 use nom_locate::LocatedSpan;
 use nom_recursive::{recursive_parser, RecursiveInfo};
@@ -19,9 +19,17 @@ pub struct Grammar {
 }
 
 impl Grammar {
-    pub fn from_file(file: &str) -> Result<Self, Box<dyn Error + '_>> {
+    pub fn from_file(file: &str) -> Result<Self, Box<dyn Error>> {
         let mut order = Vec::new();
-        let rules = rules(LocatedSpan::new_extra(file, RecursiveInfo::new()))?
+        let span = LocatedSpan::new_extra(file, RecursiveInfo::new());
+        let parse_result = match rules(span) {
+            Ok(out) => out,
+            Err(nom::Err::Error(e) | nom::Err::Failure(e)) => {
+                return Err(nom_greedyerror::convert_error(span, e))?;
+            }
+            Err(nom::Err::Incomplete(_)) => unreachable!(),
+        };
+        let rules = parse_result
             .1
             .into_iter()
             .map(|(ident, rule)| (ident.to_string(), rule))
@@ -70,15 +78,20 @@ impl Grammar {
                 }
                 (None, _) => break,
             }
+            if contents == "" {
+                break;
+            }
         }
         return result;
     }
 }
 
 type Span<'a> = LocatedSpan<&'a str, RecursiveInfo>;
+type IResult<'a, I, O> =
+    nom::IResult<I, O, nom_greedyerror::GreedyError<Span<'a>, nom::error::ErrorKind>>;
 
 fn rules(s: Span) -> IResult<Span, Vec<(Span, Expr)>> {
-    let (s, rules) = many0(delimited(multispace0, rule, ws_around(tag(";"))))(s)?;
+    let (s, rules) = many0(terminated(ws_around(rule), tag(";")))(s)?;
     let (s, _) = multispace0(s)?;
     let (s, _) = eof(s)?;
 
@@ -93,7 +106,7 @@ fn rule(s: Span) -> IResult<Span, (Span, Expr)> {
     Ok((s, (ident, expr)))
 }
 
-fn ws_around<I: Clone, O, E: ParseError<I>, F>(mut f: F) -> impl FnMut(I) -> IResult<I, O, E>
+fn ws_around<I: Clone, O, E: ParseError<I>, F>(mut f: F) -> impl FnMut(I) -> nom::IResult<I, O, E>
 where
     F: Parser<I, O, E>,
     I: nom::InputTakeAtPosition,
@@ -116,8 +129,10 @@ fn ident(s: Span) -> IResult<Span, Span> {
 fn expr(s: Span) -> IResult<Span, Expr> {
     let (s, expr) = alt((
         one_of,
-        one_or_more,
         sequence,
+        optional,
+        one_or_more,
+        zero_or_more,
         parens,
         rule_expr,
         char_range,
@@ -168,29 +183,43 @@ fn char_(s: Span) -> IResult<Span, char> {
     delimited(tag("'"), anychar, tag("'"))(s)
 }
 
-#[recursive_parser]
 fn one_of(s: Span) -> IResult<Span, Expr> {
-    let (s, expr0) = expr(s)?;
-    let (s, _) = ws_around(tag("|"))(s)?;
-    let (s, expr1) = expr(s)?;
+    let (post, pre) = terminated(take_until("|"), tag("|"))(s)?;
+    let (should_empty, expr0) = ws_around(expr)(pre)?;
+    eof(should_empty)?;
+    let (tail, expr1) = ws_around(expr)(post)?;
 
-    Ok((s, Expr::OneOf(Box::new(expr0), Box::new(expr1))))
+    Ok((tail, Expr::OneOf(Box::new(expr0), Box::new(expr1))))
 }
 
 #[recursive_parser]
 fn sequence(s: Span) -> IResult<Span, Expr> {
-    let (s, expr0) = expr(s)?;
-    let (s, _) = tag(" ")(s)?;
-    let (s, expr1) = expr(s)?;
+    let (s, exprs) = separated_list1(multispace1, expr)(s)?;
 
-    Ok((s, Expr::Sequence(Box::new(expr0), Box::new(expr1))))
+    Ok((s, Expr::Sequence(exprs)))
+}
+
+fn one_or_more(s: Span) -> IResult<Span, Expr> {
+    let (post, pre) = terminated(take_until("+"), tag("+"))(s)?;
+    let (should_empty, expr) = expr(pre)?;
+    eof(should_empty)?;
+
+    Ok((post, Expr::OneOrMore(Box::new(expr))))
+}
+
+fn zero_or_more(s: Span) -> IResult<Span, Expr> {
+    let (post, pre) = terminated(take_until("*"), tag("*"))(s)?;
+    let (should_empty, expr) = expr(pre)?;
+    eof(should_empty)?;
+
+    Ok((post, Expr::ZeroOrMore(Box::new(expr))))
 }
 
 #[recursive_parser]
-fn one_or_more(s: Span) -> IResult<Span, Expr> {
-    let (s, expr) = terminated(expr, tag("+"))(s)?;
+fn optional(s: Span) -> IResult<Span, Expr> {
+    let (s, expr) = terminated(expr, tag("?"))(s)?;
 
-    Ok((s, Expr::OneOrMore(Box::new(expr))))
+    Ok((s, Expr::Optional(Box::new(expr))))
 }
 
 #[derive(Debug)]
@@ -199,8 +228,10 @@ enum Expr {
     String(String),
     CharRange(char, char),
     OneOf(Box<Expr>, Box<Expr>),
-    Sequence(Box<Expr>, Box<Expr>),
+    Sequence(Vec<Expr>),
     OneOrMore(Box<Expr>),
+    ZeroOrMore(Box<Expr>),
+    Optional(Box<Expr>),
 }
 
 impl Expr {
@@ -212,8 +243,14 @@ impl Expr {
     ) -> Option<(&'i str, ParsedFile<'i>)> {
         match self {
             Expr::String(s) => {
-                let input = input.strip_prefix(s)?;
-                Some((input, ParsedFile::new(my_name, s)))
+                if input.starts_with(s) {
+                    Some((
+                        &input[s.len()..],
+                        ParsedFile::new(my_name, &input[..s.len()]),
+                    ))
+                } else {
+                    None
+                }
             }
             Expr::CharRange(start, end) => {
                 let mut chars = input.char_indices();
@@ -233,6 +270,18 @@ impl Expr {
                 }
                 Some((input, parsed))
             }
+            Expr::ZeroOrMore(expr) => {
+                let (mut input, mut parsed) = match expr.parse(input, my_name, rules) {
+                    None => return Some((input, ParsedFile::new(my_name, ""))),
+                    Some((remaining, parsed)) => (remaining, parsed),
+                };
+
+                while let Some((parsed_input, next_parsed)) = expr.parse(input, my_name, rules) {
+                    input = parsed_input;
+                    parsed.append(next_parsed);
+                }
+                Some((input, parsed))
+            }
             Expr::Rule(ident) => {
                 let expr = &rules[ident];
                 let (input, mut parsed) = expr.parse(input, ident, rules)?;
@@ -242,13 +291,47 @@ impl Expr {
             Expr::OneOf(expr0, expr1) => expr0
                 .parse(input, my_name, rules)
                 .or_else(|| expr1.parse(input, my_name, rules)),
-            Expr::Sequence(expr0, expr1) => {
-                let (input, mut parsed0) = expr0.parse(input, my_name, rules)?;
-                let (input, parsed1) = expr1.parse(input, my_name, rules)?;
-                parsed0.append(parsed1);
-                Some((input, parsed0))
+            Expr::Sequence(exprs) => {
+                let mut current_input = input;
+                let mut parsed = None;
+
+                for expr in exprs {
+                    let (remaining, this_parsed) = expr.parse(current_input, my_name, rules)?;
+                    current_input = remaining;
+                    match parsed.as_mut() {
+                        None => {
+                            parsed = Some(this_parsed);
+                        }
+                        Some(p) => p.append(this_parsed),
+                    }
+                }
+                Some((current_input, parsed.unwrap()))
             }
-            expr => unimplemented!("{:?}", expr),
+            Expr::Optional(expr) => {
+                if let Some((input, parsed)) = expr.parse(input, my_name, rules) {
+                    return Some((input, parsed));
+                } else {
+                    let parsed = ParsedFile::new(my_name, "");
+                    return Some((input, parsed));
+                }
+            }
+        }
+    }
+
+    fn to_string(&self) -> String {
+        match self {
+            Expr::Rule(s) => s.clone(),
+            Expr::String(s) => format!("'{}'", s),
+            Expr::CharRange(a, b) => format!("'{}'..'{}'", a, b),
+            Expr::OneOf(a, b) => format!("({} | {})", a.to_string(), b.to_string()),
+            Expr::Sequence(exprs) => exprs
+                .iter()
+                .map(Expr::to_string)
+                .collect::<Vec<_>>()
+                .join(" "),
+            Expr::OneOrMore(expr) => format!("({})+", expr.to_string()),
+            Expr::ZeroOrMore(expr) => format!("({})*", expr.to_string()),
+            Expr::Optional(expr) => format!("({})?", expr.to_string()),
         }
     }
 }
@@ -352,6 +435,13 @@ impl<'t> Region<'t> {
 }
 
 fn join_strs<'s>(s0: &'s str, s1: &'s str) -> Option<&'s str> {
+    if s0.len() == 0 {
+        return Some(s1);
+    }
+    if s1.len() == 0 {
+        return Some(s0);
+    }
+
     unsafe {
         if s0.as_ptr().add(s0.len()) != s1.as_ptr() {
             return None;
@@ -581,9 +671,50 @@ mod tests {
         let file = grammar.parse("abc").unwrap();
 
         let mut stacks = file.rule_stacks();
-        assert_eq!(stacks.next(), Some((&["abc"][..], "a")));
-        assert_eq!(stacks.next(), Some((&["abc"][..], "b")));
-        assert_eq!(stacks.next(), Some((&["abc"][..], "c")));
+        assert_eq!(stacks.next(), Some((&["abc"][..], "abc")));
+        assert_eq!(stacks.next(), None);
+    }
+
+    #[test]
+    fn optional_expr() {
+        let grammar = Grammar::from_file(
+            r"
+            foo = 'a'? 'b';
+        ",
+        )
+        .unwrap();
+        let file = grammar.parse("ab").unwrap();
+
+        let mut stacks = file.rule_stacks();
+        assert_eq!(stacks.next(), Some((&["foo"][..], "ab")));
+        assert_eq!(stacks.next(), None);
+
+        let file = grammar.parse("b").unwrap();
+
+        let mut stacks = file.rule_stacks();
+        assert_eq!(stacks.next(), Some((&["foo"][..], "b")));
+        assert_eq!(stacks.next(), None);
+    }
+
+    #[test]
+    fn zero_or_more_rules() {
+        let grammar = Grammar::from_file(
+            r"
+            num = digit*;
+            digit = '0'..'9';
+        ",
+        )
+        .unwrap();
+        let file = grammar.parse("").unwrap();
+
+        let mut stacks = file.rule_stacks();
+        assert_eq!(stacks.next(), Some((&["num"][..], "")));
+        assert_eq!(stacks.next(), None);
+
+        let file = grammar.parse("345").unwrap();
+
+        let mut stacks = file.rule_stacks();
+        assert_eq!(stacks.next(), Some((&["num", "digit"][..], "345")));
         assert_eq!(stacks.next(), None);
     }
 
@@ -604,7 +735,11 @@ mod tests {
         }
 
         #[quickcheck]
-        fn bad_strs(s0: String, s1: String) -> bool {
+        fn bad_strs(s0: String, _: String, s1: String) -> bool {
+            if s0.len() == 0 || s1.len() == 0 {
+                return true;
+            }
+
             join_strs(&s0, &s1).is_none()
         }
 
@@ -616,6 +751,11 @@ mod tests {
             let (left, right) = s.split_at(index);
             let joined = join_strs(left, right).unwrap();
             joined == s
+        }
+
+        #[quickcheck]
+        fn join_empty(s: String) -> bool {
+            join_strs(&s, "").is_some() && join_strs("", &s).is_some()
         }
     }
 }
