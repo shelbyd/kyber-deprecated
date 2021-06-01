@@ -82,6 +82,7 @@ impl Grammar {
                 break;
             }
         }
+        log::debug!("{:#?}", &result);
         return result;
     }
 }

@@ -213,9 +213,10 @@ impl<'t> ColoredText<'t> {
 
     pub fn lines<'s>(&'s self) -> impl Iterator<Item = ColoredText<'s>> {
         let mut lines = self.colored.iter().flat_map(|(color, text)| {
-            text.lines()
+            text.split("\r\n")
+                .flat_map(|l| l.split('\n'))
                 .enumerate()
-                .map(move |(i, l)| (i > 0 || *text == "\n", *color, l))
+                .map(move |(i, l)| (i > 0, *color, l))
         });
 
         let mut current = None;
@@ -311,14 +312,65 @@ mod tests {
         }
 
         #[test]
-        fn multiple_regions_with_line() {
+        fn single_newline() {
             let text = ColoredText::new(&[(None, "some text"), (None, "\n"), (None, "more text")]);
             let mut iter = text.lines();
 
-            assert_eq!(iter.next(), Some(ColoredText::only(None, "some text")));
+            assert_eq!(
+                iter.next(),
+                Some(ColoredText::new(&[(None, "some text"), (None, "")]))
+            );
             assert_eq!(
                 iter.next(),
                 Some(ColoredText::new(&[(None, ""), (None, "more text")]))
+            );
+            assert_eq!(iter.next(), None);
+        }
+
+        #[test]
+        fn multiple_newlines() {
+            let text =
+                ColoredText::new(&[(None, "some text"), (None, "\n\n"), (None, "more text")]);
+            let mut iter = text.lines();
+
+            assert_eq!(
+                iter.next(),
+                Some(ColoredText::new(&[(None, "some text"), (None, "")]))
+            );
+            assert_eq!(iter.next(), Some(ColoredText::only(None, "")));
+            assert_eq!(
+                iter.next(),
+                Some(ColoredText::new(&[(None, ""), (None, "more text")]))
+            );
+            assert_eq!(iter.next(), None);
+        }
+
+        #[test]
+        fn windows_newlines() {
+            let text =
+                ColoredText::new(&[(None, "some text"), (None, "\r\n"), (None, "more text")]);
+            let mut iter = text.lines();
+
+            assert_eq!(
+                iter.next(),
+                Some(ColoredText::new(&[(None, "some text"), (None, "")]))
+            );
+            assert_eq!(
+                iter.next(),
+                Some(ColoredText::new(&[(None, ""), (None, "more text")]))
+            );
+            assert_eq!(iter.next(), None);
+        }
+
+        #[test]
+        fn carriage_return_middle_of_line() {
+            let text =
+                ColoredText::new(&[(None, "some text\r"), (None, "more text")]);
+            let mut iter = text.lines();
+
+            assert_eq!(
+                iter.next(),
+                Some(ColoredText::new(&[(None, "some text\r"), (None, "more text")]))
             );
             assert_eq!(iter.next(), None);
         }
